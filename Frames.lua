@@ -397,6 +397,27 @@ local function Create(spec)
   divider:SetPoint("TOPLEFT", power, "TOPLEFT", 0, 1)
   divider:SetPoint("TOPRIGHT", power, "TOPRIGHT", 0, 1)
 
+  -- druid mana bar: a third bar under the power bar, only while a druid is in a form that does
+  -- not run on mana (cat, bear, dire bear). The block, and with it the border, grows downward
+  -- while it shows; nothing else is anchored to the block's bottom edge on this frame.
+  if spec.altPower then
+    local alt = CreateFrame("StatusBar", nil, block)
+    alt:SetSize(size.barWidth, size.powerHeight)
+    alt:SetPoint("TOPLEFT", power, "BOTTOMLEFT")
+    alt:SetStatusBarTexture(BarTexture())
+    alt:SetMinMaxValues(0, 1)
+    alt:SetValue(1)
+    alt:Hide()
+    u.alt = alt
+    local altDivider = overlay:CreateTexture(nil, "OVERLAY", nil, 1)
+    altDivider:SetColorTexture(0, 0, 0, 1)
+    altDivider:SetHeight(2)
+    altDivider:SetPoint("TOPLEFT", alt, "TOPLEFT", 0, 1)
+    altDivider:SetPoint("TOPRIGHT", alt, "TOPRIGHT", 0, 1)
+    altDivider:Hide()
+    u.altDivider = altDivider
+  end
+
   CreateBorder(overlay, block, T, L.borderInset)
 
   -- level badge: a miniature of the portrait (dark disc + soft ring). The pieces are
@@ -505,28 +526,6 @@ local function Create(spec)
 end
 
 -- Layout (idempotent; Blizzard re-anchors things during its own updates) -----
-
-local function LayoutAltPower(u)
-  local alt = _G.AlternatePowerBar
-  if not alt or InCombat() then return end
-  Place(alt, "TOP", u.block, "BOTTOM", 0, -(L.border + 6))
-  alt:SetSize(u.size.barWidth, 10)
-  if alt.PowerBarMask then alt.PowerBarMask:Hide() end
-  if not u.altSkinned then
-    u.altSkinned = true
-    alt:SetStatusBarTexture(BarTexture())
-    local bg = alt:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, .85)
-    CreateBorder(alt, alt, 3, L.borderInset)
-    HookMethod(alt, "EvaluateUnit", function(self)
-      self:SetStatusBarTexture(BarTexture())
-      local c = PowerBarColor and PowerBarColor.MANA
-      if c then self:SetStatusBarColor(c.r, c.g, c.b) end
-      if self.PowerBarMask then self.PowerBarMask:Hide() end
-    end)
-  end
-end
 
 -- The target-of-target frames hang off their parent frame: the native frame is
 -- moved (out of combat only) so its click area follows the new bars.
@@ -669,7 +668,6 @@ local function Layout(u)
     Place(d.region, d.point, d.rel, d.relPoint, d.x, d.y)
     if d.w then d.region:SetSize(d.w, d.h) end
   end
-  if u.unit == "player" then LayoutAltPower(u) end
   PlaceNative(u)
 end
 
@@ -759,6 +757,46 @@ local function UpdateCost(u)
   gauge:Show()
 end
 
+-- Druid mana bar -------------------------------------------------------------
+-- Shown while a druid's main power is not mana (cat form: energy, bear / dire bear: rage).
+
+local MANA = (Enum and Enum.PowerType and Enum.PowerType.Mana) or 0
+
+local isDruid
+local function AltWanted()
+  if isDruid == nil then
+    local token = NF.ClassToken("player")
+    if token == nil then return false end -- not known yet: ask again next time
+    isDruid = NF.Readable(token) and token == "DRUID"
+  end
+  if not isDruid then return false end
+  local powerType = UnitPowerType("player")
+  return NF.Readable(powerType) and powerType ~= MANA
+end
+
+local function SetAltShown(u, shown)
+  u.altShown = shown
+  u.alt:SetShown(shown)
+  u.altDivider:SetShown(shown)
+  u.block:SetHeight(u.size.hpHeight + u.size.powerHeight + (shown and u.size.powerHeight or 0))
+  if u.slots and u.slots.alt then
+    for _, fs in pairs(u.slots.alt) do fs:SetShown(shown) end
+  end
+end
+
+local function UpdateAlt(u)
+  if not u.alt then return end
+  local wanted = AltWanted()
+  if wanted ~= (u.altShown or false) then SetAltShown(u, wanted) end
+  if not wanted then return end
+  local c = PowerBarColor and (PowerBarColor.MANA or PowerBarColor[MANA])
+  if c then u.alt:SetStatusBarColor(c.r, c.g, c.b) else u.alt:SetStatusBarColor(0, 0, 1) end
+  -- values go straight into the bar: in instances they can be protected
+  u.alt:SetMinMaxValues(0, UnitPowerMax("player", MANA))
+  u.alt:SetValue(UnitPower("player", MANA))
+  if u.slots then NF.Text.UpdateAlt(u) end
+end
+
 -- Value only: runs on every UNIT_POWER_FREQUENT, so it stays cheap.
 local function UpdatePowerValue(u)
   local unit = u.unit
@@ -767,6 +805,7 @@ local function UpdatePowerValue(u)
   u.power:SetValue(UnitPower(unit))
   UpdateCost(u)
   if u.slots then NF.Text.UpdatePower(u) end
+  UpdateAlt(u)
 end
 
 local function UpdatePower(u)
@@ -1020,11 +1059,13 @@ local function Resize(u)
   local blockH = size.hpHeight + size.powerHeight
   local side = u.mirrored and "TOPRIGHT" or "TOPLEFT"
   local sign = u.mirrored and -1 or 1
-  u.block:SetSize(size.barWidth, blockH)
+  -- the druid mana bar (when showing) adds one more power-bar height; the block's top stays put
+  u.block:SetSize(size.barWidth, blockH + (u.altShown and size.powerHeight or 0))
   u.block:ClearAllPoints()
   u.block:SetPoint(side, u.frame, side, sign * spec.blockPos[1], -spec.blockPos[2])
   u.hp:SetSize(size.barWidth, size.hpHeight)
   u.power:SetSize(size.barWidth, size.powerHeight)
+  if u.alt then u.alt:SetSize(size.barWidth, size.powerHeight) end
   if u.costGauge then u.costGauge:SetSize(size.barWidth, size.powerHeight) end
   u.extent = spec.blockPos[2] + blockH + size.border
   if u.slots then NF.Text.Resize(u) end
@@ -1048,10 +1089,9 @@ function NF.ApplyBarTexture()
   for _, u in pairs(units) do
     u.hp:SetStatusBarTexture(texture)
     u.power:SetStatusBarTexture(texture)
+    if u.alt then u.alt:SetStatusBarTexture(texture) end
     if u.healBar then u.healBar:SetStatusBarTexture(texture) end
   end
-  local alt = _G.AlternatePowerBar
-  if alt and units.player and units.player.altSkinned then alt:SetStatusBarTexture(texture) end
   if NF.CastBars then NF.CastBars.ApplyTexture() end
   -- a new texture can reset the fill colour
   for _, u in pairs(units) do FullUpdate(u) end
@@ -1073,6 +1113,14 @@ function NF.ApplyText()
   if not NF.active then return end
   for _, u in pairs(units) do
     if u.slots then NF.Text.Update(u) end
+  end
+end
+
+-- bar text sizes (options sliders)
+function NF.ApplyFonts()
+  if not NF.active then return end
+  for _, u in pairs(units) do
+    if u.slots then NF.Text.Resize(u) end
   end
 end
 
@@ -1116,8 +1164,11 @@ local function Setup()
     unit = "player", native = PlayerFrame, mirrored = false, parts = PlayerParts(), decorations = PlayerDecorations,
     size = MAIN, portrait = L.portrait, portraitPos = { L.portraitInset, L.portraitTop },
     blockPos = geo.mainBlockPos, overlap = L.portraitOverlap, level = "ring", ownText = true,
+    altPower = true, refresh = { "UPDATE_SHAPESHIFT_FORM" },
   })
   CreateStatusIcons(units.player)
+  -- the native alternate power bar (the druid's mana in forms) is replaced by the bar above
+  if _G.AlternatePowerBar then NF.HideFrame(_G.AlternatePowerBar) end
   CreateCostPrediction(units.player)
 
   units.target = Create({

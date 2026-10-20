@@ -107,13 +107,25 @@ local function Feedback(c, label)
   c.frame:Show()
 end
 
-local function OnEvent(c, event)
-  if event == "UNIT_SPELLCAST_INTERRUPTED" then
-    Feedback(c, INTERRUPTED or "Interrupted")
-  elseif event == "UNIT_SPELLCAST_FAILED" then
-    Feedback(c, FAILED or "Failed")
+-- "Interrupted" / "Failed" only ever describe the cast this bar is showing. A failed attempt
+-- at anything else (an instant spell, a second cast while one is running) arrives as the same
+-- event and must not put up a red bar, so the feedback needs a cast on the bar and, when both
+-- ids can be read, the same cast id.
+local function OnEvent(c, event, _, castGUID)
+  if event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+    local sameCast = c.duration ~= nil
+    if sameCast and NF.Readable(castGUID) and NF.Readable(c.castGUID) and castGUID ~= nil and c.castGUID ~= nil
+        and castGUID ~= c.castGUID then
+      sameCast = false
+    end
+    if sameCast then
+      Feedback(c, event == "UNIT_SPELLCAST_INTERRUPTED" and (INTERRUPTED or "Interrupted") or (FAILED or "Failed"))
+    else
+      Refresh(c)
+    end
   elseif event == "UNIT_SPELLCAST_START" or event == "UNIT_SPELLCAST_CHANNEL_START" then
     c.holdUntil = nil
+    c.castGUID = castGUID
     c.feedback:Hide()
     Refresh(c)
   else -- stop, delayed, channel update/stop, (not) interruptible, target/focus changed
@@ -180,7 +192,7 @@ local function Create(u)
 
   for _, event in ipairs(EVENTS) do pcall(frame.RegisterUnitEvent, frame, event, u.unit) end
   frame:RegisterEvent(u.unit == "focus" and "PLAYER_FOCUS_CHANGED" or "PLAYER_TARGET_CHANGED")
-  frame:SetScript("OnEvent", function(_, event) OnEvent(c, event) end)
+  frame:SetScript("OnEvent", function(_, event, ...) OnEvent(c, event, ...) end)
   -- native timers animate the fill; this only watches for the cast ending and updates the time
   frame:SetScript("OnUpdate", function(_, dt)
     c.elapsed = c.elapsed + dt

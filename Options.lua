@@ -170,18 +170,27 @@ local TEXT_FRAMES = { { "player", "Player" }, { "target", "Target" }, { "pet", "
 
 Options.textFrame = "player"
 
-local function TextRow(content, y, kind, title)
-  Label(content, 10, y, title, "GameFontNormal")
+-- `visible` (optional): a function; the whole row is shown only while it returns true.
+local function TextRow(content, y, kind, title, visible)
+  local items = { Label(content, 10, y, title, "GameFontNormal") }
   local columns = { { "left", "Left", 10 }, { "center", "Center", 210 }, { "right", "Right", 410 } }
   for _, col in ipairs(columns) do
     local where, caption, x = col[1], col[2], col[3]
-    Label(content, x, y - 20, caption, "GameFontNormalSmall")
-    Dropdown(content, x, y - 38, 190, NF.Text.FORMATS,
-      function() return NF.db.text[Options.textFrame][kind][where] end,
+    items[#items + 1] = Label(content, x, y - 20, caption, "GameFontNormalSmall")
+    items[#items + 1] = Dropdown(content, x, y - 38, 190, NF.Text.FORMATS,
+      function() return NF.db.text[Options.textFrame][kind] and NF.db.text[Options.textFrame][kind][where] or "none" end,
       function(value)
         NF.db.text[Options.textFrame][kind][where] = value
         NF.ApplyText()
       end)
+  end
+  if visible then
+    widgets[#widgets + 1] = {
+      Refresh = function()
+        local on = visible() and true or false
+        for _, item in ipairs(items) do item:SetShown(on) end
+      end,
+    }
   end
 end
 
@@ -241,9 +250,20 @@ local function Build(content)
     Options.textFrame = value
     RefreshAll()
   end)
-  TextRow(content, -630, "hp", "Health text")
-  TextRow(content, -710, "mp", "Power text")
-  Label(content, 10, -786, "Focus and target-of-target show no numbers. Open this panel any time with /nf or /norabu.", "GameFontDisableSmall")
+  -- text sizes for the frame chosen above (the druid mana text uses the power size)
+  local function fontSize(kind)
+    return function() return db().fontSize[Options.textFrame][kind] end,
+      function(value)
+        db().fontSize[Options.textFrame][kind] = value
+        NF.ApplyFonts()
+      end
+  end
+  Slider(content, 10, -630, "Health text size", 8, 20, fontSize("hp"))
+  Slider(content, 300, -630, "Power text size", 8, 20, fontSize("mp"))
+  TextRow(content, -690, "hp", "Health text")
+  TextRow(content, -770, "mp", "Power text")
+  TextRow(content, -850, "alt", "Druid mana text (cat / bear form)", function() return Options.textFrame == "player" end)
+  Label(content, 10, -930, "Focus and target-of-target show no numbers. Open this panel any time with /nf or /norabu.", "GameFontDisableSmall")
 end
 
 -- Registration -------------------------------------------------------------
@@ -257,7 +277,7 @@ function Options.Init()
   scroll:SetPoint("TOPLEFT", 8, -8)
   scroll:SetPoint("BOTTOMRIGHT", -30, 8)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 816)
+  content:SetSize(600, 960)
   scroll:SetScrollChild(content)
   Build(content)
   panel:SetScript("OnShow", RefreshAll)

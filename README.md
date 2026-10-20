@@ -15,7 +15,8 @@ Unit frames for the World of Warcraft Classic client, with a classic layout and 
 - Elite, rare and boss artwork around the target icon.
 - Incoming-heal prediction, and a mana-cost preview while you cast.
 - Your own target and focus cast bars: icon, spell name, time left, and a gray tint for casts that can't be interrupted.
-- Bar text you can configure for each frame: raw value, abbreviated, percent, or a combination, placed left, centre or right.
+- Bar text you can configure for each frame: raw value, abbreviated, percent, or a combination, placed left, centre or right, with its own size sliders for health and power.
+- A druid's mana bar under the power bar while in cat, bear or dire bear form, with the same text options.
 
 ## Install
 

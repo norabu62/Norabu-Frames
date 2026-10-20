@@ -38,8 +38,8 @@ NF.layout.barInset = NF.layout.portraitInset + NF.layout.portrait + 4 - NF.layou
 
 -- Bar text: one format per slot (left / center / right) for health and power, per frame.
 -- Formats: none, raw, abbr, pct, raw_pct, abbr_pct, raw_max, abbr_max (see Text.lua).
-local function TextDefaults(hp, mp)
-  return { hp = hp, mp = mp }
+local function TextDefaults(hp, mp, alt)
+  return { hp = hp, mp = mp, alt = alt }
 end
 
 local DEFAULTS = {
@@ -52,9 +52,17 @@ local DEFAULTS = {
     compact = { barWidth = 83, hpHeight = 18, powerHeight = 8 },   -- focus, pet, target of target
   },
   text = {
-    player = TextDefaults({ left = "pct", center = "none", right = "raw" }, { left = "pct", center = "none", right = "raw" }),
+    -- `alt` is the druid mana bar under the player's power bar (cat / bear forms)
+    player = TextDefaults({ left = "pct", center = "none", right = "raw" }, { left = "pct", center = "none", right = "raw" },
+      { left = "pct", center = "none", right = "raw" }),
     target = TextDefaults({ left = "pct", center = "none", right = "raw" }, { left = "pct", center = "none", right = "raw" }),
     pet = TextDefaults({ left = "none", center = "abbr", right = "none" }, { left = "none", center = "none", right = "none" }),
+  },
+  -- bar text size in points, per frame: health and power (the druid mana bar uses the power size)
+  fontSize = {
+    player = { hp = 12, mp = 12 },
+    target = { hp = 12, mp = 12 },
+    pet = { hp = 12, mp = 12 },
   },
 }
 NF.DEFAULTS = DEFAULTS

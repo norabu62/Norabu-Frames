@@ -31,14 +31,17 @@ local function Short(value)
   return Whole(value)
 end
 
+local MANA = (Enum and Enum.PowerType and Enum.PowerType.Mana) or 0
+
 -- 0-100 percent. Only available through the client's percent APIs (no arithmetic here).
+-- kind: "hp" health, "mp" the unit's main power, "alt" mana (the druid mana bar in cat / bear form).
 local function Percent(unit, kind)
   local curve = CurveConstants and CurveConstants.ScaleTo100
   if not curve then return nil end
   if kind == "hp" then
     return UnitHealthPercent(unit, true, curve)
   end
-  return UnitPowerPercent(unit, nil, false, curve)
+  return UnitPowerPercent(unit, kind == "alt" and MANA or nil, false, curve)
 end
 
 local function Render(format, unit, kind)
@@ -46,6 +49,8 @@ local function Render(format, unit, kind)
   local cur, max
   if kind == "hp" then
     cur, max = UnitHealth(unit), UnitHealthMax(unit)
+  elseif kind == "alt" then
+    cur, max = UnitPower(unit, MANA), UnitPowerMax(unit, MANA)
   else
     cur, max = UnitPower(unit), UnitPowerMax(unit)
   end
@@ -80,17 +85,23 @@ end
 
 function Text.UpdateHealth(u) UpdateKind(u, "hp") end
 function Text.UpdatePower(u) UpdateKind(u, "mp") end
+function Text.UpdateAlt(u)
+  if u.altShown then UpdateKind(u, "alt") end
+end
 
 function Text.Update(u)
   UpdateKind(u, "hp")
   UpdateKind(u, "mp")
+  Text.UpdateAlt(u)
 end
 
--- Font size follows the bar height.
+-- Font size comes from the options (per frame: health and power; the druid mana bar uses the
+-- power size).
 function Text.Resize(u)
   if not u.slots then return end
-  local hpSize = math.max(8, math.min(13, math.floor(u.size.hpHeight * .5)))
-  local mpSize = math.max(8, math.min(11, math.floor(u.size.powerHeight * .8)))
+  local sizes = NF.db.fontSize and NF.db.fontSize[u.unit]
+  local hpSize = sizes and sizes.hp or 12
+  local mpSize = sizes and sizes.mp or 12
   for kind, slots in pairs(u.slots) do
     local size = kind == "hp" and hpSize or mpSize
     for _, fs in pairs(slots) do fs:SetFont(STANDARD_TEXT_FONT, size, "OUTLINE") end
@@ -104,8 +115,10 @@ function Text.Create(u)
   local leftPad = u.mirrored and pad or near
   local rightPad = u.mirrored and near or pad
   u.slots = {}
-  for _, kind in ipairs({ "hp", "mp" }) do
-    local bar = kind == "hp" and u.hp or u.power
+  local kinds = { "hp", "mp" }
+  if u.alt then kinds[#kinds + 1] = "alt" end
+  for _, kind in ipairs(kinds) do
+    local bar = (kind == "hp" and u.hp) or (kind == "alt" and u.alt) or u.power
     local slots = {}
     for _, where in ipairs({ "left", "center", "right" }) do
       local fs = u.overlay:CreateFontString(nil, "OVERLAY")
@@ -120,6 +133,8 @@ function Text.Create(u)
       else
         fs:SetPoint("CENTER", bar, "CENTER", 0, 0)
       end
+      -- the druid mana text only exists while its bar does
+      if kind == "alt" then fs:SetShown(u.altShown and true or false) end
       slots[where] = fs
     end
     u.slots[kind] = slots
