@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: norabu_frames
+## Notes: Classic-baseline unit frames with a thick soft black border and a merged health bar. /nf for options.
+## Author: norabu
+## Version: 0.4.0
+## SavedVariables: NorabuFramesDB
+
+Core.lua
+Text.lua
+Frames.lua
+CastBars.lua
+Options.lua
