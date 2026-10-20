@@ -2,7 +2,8 @@
 
 Unit frames for the World of Warcraft Classic client, with a classic layout and a thick, soft black border.
 
-![norabu_frames screenshot](docs/screenshot.png)
+<img width="901" height="278" alt="image" src="https://github.com/user-attachments/assets/b61b13dc-5ec3-46bd-a514-85b013d179df" />
+
 
 *Player (left), target with its target-of-target (centre) and focus (top right).*
 
