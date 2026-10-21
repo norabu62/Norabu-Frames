@@ -264,6 +264,35 @@ local function Build(content)
   TextRow(content, -770, "mp", "Power text")
   TextRow(content, -850, "alt", "Druid mana text (cat / bear form)", function() return Options.textFrame == "player" end)
   Label(content, 10, -930, "Focus and target-of-target show no numbers. Open this panel any time with /nf or /norabu.", "GameFontDisableSmall")
+
+  Header(content, -966, "Target combo points")
+  Checkbox(content, 10, -1000, "Show combo points on the target frame",
+    function() return db().combo.show end,
+    function(value)
+      db().combo.show = value
+      NF.ApplyCombo()
+    end)
+  local function comboOffset(key)
+    return function() return db().combo[key] end,
+      function(value)
+        db().combo[key] = value
+        NF.ApplyCombo()
+      end
+  end
+  Slider(content, 10, -1038, "Horizontal offset (right is positive)", -60, 60, comboOffset("x"))
+  Slider(content, 300, -1038, "Vertical offset (up is positive)", -60, 60, comboOffset("y"))
+
+  Header(content, -1100, "Target buffs and debuffs")
+  local function auraOffset(key)
+    return function() return db().auras[key] end,
+      function(value)
+        db().auras[key] = value
+        NF.ApplyAuras()
+      end
+  end
+  Slider(content, 10, -1134, "Horizontal offset (right is positive)", -40, 40, auraOffset("x"))
+  Slider(content, 300, -1134, "Vertical offset (up is positive)", -40, 40, auraOffset("y"))
+  Label(content, 10, -1190, "Offsets are measured from the bars' left edge, under the bars. Adjust until the first icon is flush with the frame.", "GameFontDisableSmall")
 end
 
 -- Registration -------------------------------------------------------------
@@ -277,7 +306,7 @@ function Options.Init()
   scroll:SetPoint("TOPLEFT", 8, -8)
   scroll:SetPoint("BOTTOMRIGHT", -30, 8)
   local content = CreateFrame("Frame", nil, scroll)
-  content:SetSize(600, 960)
+  content:SetSize(600, 1230)
   scroll:SetScrollChild(content)
   Build(content)
   panel:SetScript("OnShow", RefreshAll)
@@ -304,7 +333,13 @@ end
 
 SLASH_NORABUFRAMES1 = "/nf"
 SLASH_NORABUFRAMES2 = "/norabu"
-SlashCmdList.NORABUFRAMES = function() Options.Open() end
+SlashCmdList.NORABUFRAMES = function(msg)
+  if msg and msg:lower():match("^%s*debug") then
+    if NF.Debug then NF.Debug() end
+  else
+    Options.Open()
+  end
+end
 
 local boot = CreateFrame("Frame")
 boot:RegisterEvent("PLAYER_LOGIN")

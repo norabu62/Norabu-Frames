@@ -147,6 +147,7 @@ local function TargetParts(native)
   local hpBar = hpc and hpc.HealthBar
   local mpBar = main and main.ManaBar
   return {
+    pinOnly = Collect(cont and cont.FrameTexture), -- alpha-pinned, never reparented: it anchors the aura container
     main = main,
     ctx = ctx,
     name = main and main.Name,
@@ -164,7 +165,7 @@ local function TargetParts(native)
       right = mpBar and mpBar.RightText,
     },
     suppress = Collect(
-      cont and cont.FrameTexture, cont and cont.Flash, cont and cont.BossPortraitFrameTexture,
+      cont and cont.Flash, cont and cont.BossPortraitFrameTexture,
       cont and cont.Portrait,
       main and main.ReputationColor, main and main.LevelBackgroundCircle,
       hpc, mpBar,
@@ -511,6 +512,7 @@ local function Create(spec)
 
   -- hide Blizzard's art and bars last, after the pieces we keep have been moved out
   NF.SuppressAll(unpack(parts.suppress))
+  for _, region in ipairs(parts.pinOnly or {}) do NF.Suppress(region) end
 
   if spec.detach then
     f:SetShown(native:IsShown())
@@ -671,20 +673,148 @@ local function Layout(u)
   PlaceNative(u)
 end
 
+-- Combo points (Forever draws the classic ComboFrame on the target): its points
+-- (ComboFrame.ComboPoints) are laid out as an arc on the outside of the target icon's ring, on the
+-- side away from the bars, then moved by the x / y offsets from the options. ComboFrame is
+-- re-anchored to the native TargetFrame on every update, so the points are anchored to my icon
+-- instead and this runs again after each update. The options can also hide them altogether.
+local function PlaceCombo()
+  local u = units.target
+  local ring = _G.ComboFrame
+  local points = ring and ring.ComboPoints
+  if not (NF.active and u and u.ready and u.portrait and points) then return end
+  local cfg = NF.db.combo
+  NF.Suppress(ring, not cfg.show) -- pinned transparent while switched off, put back when on
+  if not cfg.show then return end
+  local start = ring.startComboPointIndex or 2   -- points before it are not used with 5 combo points
+  local radius = L.ringSize / 2 + 10
+  local side = u.mirrored and 1 or -1
+  for index, point in ipairs(points) do
+    local angle = math.rad(70 - (index - start) * 32) -- top to bottom along the outer side
+    Place(point, "CENTER", u.portrait, "CENTER",
+      side * (radius * math.cos(angle)) + cfg.x, radius * math.sin(angle) + cfg.y)
+  end
+end
+
+function NF.ApplyCombo()
+  PlaceCombo()
+end
+
 -- Auras stay native; they are re-anchored under the bars (and under the ToT frame
 -- while it is showing). Focus shows none: its container is pinned to alpha 0.
-local function AnchorAuras(u)
+-- The container is only ever anchored to the native frame's own FrameTexture (what Blizzard and
+-- ClassicFrames anchor it to), never to one of my frames: anchoring the client's aura container to
+-- an addon frame is what made the buffs disappear. The offsets are numbers measured so that the
+-- container's top-left lands under the bars' left edge.
+local AnchorAuras
+
+local function ScaleOf(region)
+  if region.GetEffectiveScale then return region:GetEffectiveScale() end
+  local parent = region:GetParent()
+  return parent and parent:GetEffectiveScale()
+end
+
+local function AuraOffsets(u, texture, container)
+  local fl, fb = texture:GetLeft(), texture:GetBottom()
+  local bl, bb = u.block:GetLeft(), u.block:GetBottom()
+  local fs, bs, cs = ScaleOf(texture), u.block:GetEffectiveScale(), container:GetEffectiveScale()
+  for _, v in ipairs({ fl or false, fb or false, bl or false, bb or false, fs or false, bs, cs }) do
+    if v == false or not NF.Readable(v) then return end
+  end
+  if cs <= 0 then return end
+  local ui = UIParent:GetEffectiveScale()
+  local wantLeft = bl * bs / ui
+  local wantTop = (bb - (u.size.border + 4)) * bs / ui
+  local k = cs / ui
+  local cfg = NF.db.auras
+  return (wantLeft - fl * fs / ui) / k + cfg.x, (wantTop - fb * fs / ui) / k + cfg.y
+end
+
+function NF.ApplyAuras()
+  if units.target then AnchorAuras(units.target) end
+end
+
+AnchorAuras = function(u, retried)
   if not NF.active or not u or not u.ready then return end
   local container = u.native.GetAuraContainer and u.native:GetAuraContainer()
   if not container then return end
   if u.spec.hideAuras then NF.Suppress(container) return end
-  if InCombat() then u.auraPending = true return end
   u.auraPending = false
-  Place(container, "TOPLEFT", u.block, "BOTTOMLEFT", 0, -(u.size.border + 4))
+  local cont = u.native.TargetFrameContainer
+  local texture = cont and cont.FrameTexture
+  if texture then
+    -- measured out of combat (positions can be protected in it); the last result is reused
+    -- in combat, so the rows do not sit at Blizzard's spot until the fight is over
+    local x, y
+    if not InCombat() then
+      x, y = AuraOffsets(u, texture, container)
+      if x then u.auraCache = { x, y } end
+    end
+    if not x and u.auraCache then x, y = u.auraCache[1], u.auraCache[2] end
+    if x then
+      local ok = pcall(function()
+        container:ClearAllPoints()
+        container:SetPoint("TOPLEFT", texture, "BOTTOMLEFT", x, y)
+      end)
+      if not ok then u.auraPending = true end
+    elseif not retried then
+      C_Timer.After(.2, function() AnchorAuras(u, true) end) -- not laid out yet
+    else
+      u.auraPending = true
+    end
+  end
   -- keep the rows narrower than the space left of the target-of-target icon
   if u.spec.auraMaxWidth and container.SetFlowLayoutMaximumLineSize then
     pcall(container.SetFlowLayoutMaximumLineSize, container, u.spec.auraMaxWidth)
   end
+end
+
+-- `/nf debug` or the options button: what the client does with the combo points and aura rows.
+function NF.Debug()
+  local function say(...) print("|cffffd200norabu_frames|r", ...) end
+  local function name(region)
+    return region and ((region.GetName and region:GetName()) or tostring(region)) or "?"
+  end
+  local function points(region)
+    local out = {}
+    for i = 1, tonumber(region:GetNumPoints()) or 0 do
+      local point, rel, relPoint, x, y = region:GetPoint(i)
+      out[#out + 1] = string.format("%s -> %s %s (%.1f, %.1f)", tostring(point), name(rel), tostring(relPoint), x or 0, y or 0)
+    end
+    return table.concat(out, "; ")
+  end
+  local function section(title, fn)
+    local ok, err = pcall(fn)
+    if not ok then say(title .. " error:", tostring(err)) end
+  end
+  say("debug info (version " .. tostring(NF.version) .. ")")
+  section("aura container", function()
+    local u = units.target
+    local container = u and u.native.GetAuraContainer and u.native:GetAuraContainer()
+    if not container then say("no target aura container") return end
+    say("aura container:", points(container))
+    say(string.format("  container left %s top %s, bars left %s bottom %s",
+      tostring(container:GetLeft()), tostring(container:GetTop()), tostring(u.block:GetLeft()), tostring(u.block:GetBottom())))
+    local cont = u.native.TargetFrameContainer
+    local ft = cont and cont.FrameTexture
+    if ft then say(string.format("  FrameTexture left %s bottom %s parent %s", tostring(ft:GetLeft()), tostring(ft:GetBottom()),
+      name(ft:GetParent()))) end
+    say("  scales: container", tostring(container:GetEffectiveScale()), "bars", tostring(u.block:GetEffectiveScale()),
+      "UIParent", tostring(UIParent:GetEffectiveScale()), "offset", tostring(NF.db.auras.x), tostring(NF.db.auras.y))
+  end)
+  section("buff frame", function()
+    local buffs = _G.BuffFrame
+    if not buffs then say("no BuffFrame") return end
+    say("BuffFrame: shown", tostring(buffs:IsShown()), "alpha", tostring(buffs:GetAlpha()), "parent", name(buffs:GetParent()), points(buffs))
+  end)
+  section("combo frame", function()
+    local ring = _G.ComboFrame
+    if not ring then say("no ComboFrame") return end
+    say("ComboFrame:", points(ring), "shown", tostring(ring:IsShown()), "parent", name(ring:GetParent()))
+    local list = ring.ComboPoints
+    say("  ComboPoints", list and #list or "none", "start", tostring(ring.startComboPointIndex))
+    if list and list[2] then say("  point 2:", points(list[2])) end
+  end)
 end
 
 -- Updates -----------------------------------------------------------------
@@ -948,6 +1078,11 @@ local function InstallHooks()
       "PlayerFrame_UpdatePvPStatus", "PlayerFrame_UpdateRolesAssigned" }) do
     HookGlobal(name, relayout(player))
   end
+  HookGlobal("ComboFrame_Update", PlaceCombo)
+  if _G.ComboFrame and _G.ComboFrame.HookScript then
+    _G.ComboFrame:HookScript("OnShow", PlaceCombo)
+    _G.ComboFrame:HookScript("OnEvent", PlaceCombo)
+  end
   HookGlobal("PlayerFrame_UpdateStatus", function()
     if NF.active and player.ready then Layout(player) UpdateStatus(player) end
   end)
@@ -1130,6 +1265,7 @@ function NF.ApplyAll()
   NF.ApplyBarTexture()
   NF.ApplyIcons()
   NF.ApplyText()
+  NF.ApplyCombo()
   if NF.CastBars then NF.CastBars.Apply() end
 end
 
@@ -1231,6 +1367,7 @@ local function Setup()
   end
   AnchorAuras(units.target)
   AnchorAuras(units.focus)
+  PlaceCombo()
 
   -- hide every native glow/flash, and any native portrait or boss art that is still showing,
   -- inside the frames' art/content areas (never our own frames, never the aura containers)
@@ -1239,6 +1376,8 @@ local function Setup()
   for _, native in ipairs(Collect(TargetFrame, FocusFrame)) do
     local container = native.GetAuraContainer and native:GetAuraContainer()
     if container then skip[container] = true end
+    local cont = native.TargetFrameContainer
+    if cont and cont.FrameTexture then skip[cont.FrameTexture] = true end
   end
   -- the focus has no auras to protect, so its whole native tree is swept
   local roots = Collect(

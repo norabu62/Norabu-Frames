@@ -58,6 +58,11 @@ local DEFAULTS = {
     target = TextDefaults({ left = "pct", center = "none", right = "raw" }, { left = "pct", center = "none", right = "raw" }),
     pet = TextDefaults({ left = "none", center = "abbr", right = "none" }, { left = "none", center = "none", right = "none" }),
   },
+  -- combo points on the target frame: shown or hidden, and an offset (pixels, right / up) from
+  -- their default arc around the outside of the target icon
+  combo = { show = true, x = 12, y = 0 },
+  -- offset (pixels, right / up) of the target's buff and debuff rows from the left edge of the bars
+  auras = { x = 0, y = 0 },
   -- bar text size in points, per frame: health and power (the druid mana bar uses the power size)
   fontSize = {
     player = { hp = 12, mp = 12 },
@@ -92,6 +97,9 @@ loader:SetScript("OnEvent", function(self, _, name)
   NorabuFramesDB = NorabuFramesDB or {}
   Merge(NorabuFramesDB, DEFAULTS)
   NorabuFramesDB.enabled = nil -- removed option: the addon always loads
+  -- the aura offset used to default to 7 while the rows were being placed wrongly in combat
+  local auras = NorabuFramesDB.auras
+  if auras and auras.x == 7 and auras.y == 0 then auras.x = 0 end
   NF.db = NorabuFramesDB
   self:UnregisterEvent("ADDON_LOADED")
 end)
